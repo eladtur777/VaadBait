@@ -39,3 +39,18 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Nested/duplicate project folders - exclude these
+TestAI/
+SoundToTxtHebrew/
+elad dok backup/
+
+# Backup/test files
+App.simple.tsx
+errorexpo.jpg
+
+# Claude config
+.claude/
+
+# HOW_TO_RUN (optional documentation)
+HOW_TO_RUN.md
