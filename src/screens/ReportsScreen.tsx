@@ -1,12 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity, Platform } from 'react-native';
 import { Card, Button, ActivityIndicator } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
-import * as FileSystem from 'expo-file-system/legacy';
 import {
   CommitteeIncomeService,
   CommitteeExpensesService,
@@ -188,17 +187,27 @@ export default function ReportsScreen({ navigation }: any) {
         </html>
       `;
 
-      // Generate PDF
-      const { uri } = await Print.printToFileAsync({ html });
-
-      // Share the PDF
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          UTI: '.pdf',
-          mimeType: 'application/pdf',
-        });
+      if (Platform.OS === 'web') {
+        // For web: open print dialog
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.print();
+        }
       } else {
-        Alert.alert('הצלחה', 'הקובץ נשמר בהצלחה');
+        // For mobile: use expo-print
+        const { uri } = await Print.printToFileAsync({ html });
+
+        // Share the PDF
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, {
+            UTI: '.pdf',
+            mimeType: 'application/pdf',
+          });
+        } else {
+          Alert.alert('הצלחה', 'הקובץ נשמר בהצלחה');
+        }
       }
     } catch (error) {
       console.error('Error exporting PDF:', error);
@@ -288,23 +297,36 @@ export default function ReportsScreen({ navigation }: any) {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'דוח חודשי');
 
-      // Generate Excel file
-      const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-
-      // Save to file system using legacy API
-      const fileUri = FileSystem.documentDirectory + 'דוח_כספי_' + Date.now() + '.xlsx';
-      await FileSystem.writeAsStringAsync(fileUri, wbout, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      // Share the Excel file
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          UTI: 'com.microsoft.excel.xlsx',
-          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        });
+      if (Platform.OS === 'web') {
+        // For web: download directly
+        const wbout = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+        const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `דוח_כספי_${monthNames[selectedMonth]}_${selectedYear}.xlsx`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
       } else {
-        Alert.alert('הצלחה', 'הקובץ נשמר בהצלחה');
+        // For mobile: use file system and sharing
+        const FileSystem = require('expo-file-system/legacy');
+        const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+        const fileUri = FileSystem.documentDirectory + 'דוח_כספי_' + Date.now() + '.xlsx';
+        await FileSystem.writeAsStringAsync(fileUri, wbout, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        // Share the Excel file
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, {
+            UTI: 'com.microsoft.excel.xlsx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          });
+        } else {
+          Alert.alert('הצלחה', 'הקובץ נשמר בהצלחה');
+        }
       }
     } catch (error) {
       console.error('Error exporting Excel:', error);
