@@ -234,7 +234,7 @@ export default function PersonalScreen({ navigation }: any) {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <View style={styles.header}>
-        <Text style={styles.title}>משק בית אישי</Text>
+        <Text style={styles.title}>משק בית - עונות השנה 23</Text>
       </View>
 
       <View style={styles.summaryContainer}>
