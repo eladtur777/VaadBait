@@ -6,6 +6,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { Provider as PaperProvider, DefaultTheme, Button } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useFonts } from 'expo-font';
 
 // Auth
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
@@ -292,6 +293,19 @@ function MainApp() {
 }
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    ...MaterialCommunityIcons.font,
+  });
+
+  if (!fontsLoaded) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6200EE" />
+        <Text style={styles.loadingText}>טוען גופנים...</Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <PaperProvider theme={theme}>
