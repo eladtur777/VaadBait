@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "ניהול כספים",
+    "slug": "financial-manager",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "supportsRTL": true,
+    "locales": {
+      "he": "./src/i18n/he.json",
+      "en": "./src/i18n/en.json"
+    },
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.financial.manager"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.financial.manager",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-sqlite"
+      ],
+      [
+        "expo-image-picker"
+      ],
+      [
+        "expo-file-system"
+      ]
+    ]
+  }
+}
