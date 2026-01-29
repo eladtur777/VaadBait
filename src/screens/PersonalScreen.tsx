@@ -1,0 +1,480 @@
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert } from 'react-native';
+import { Button, Card, ActivityIndicator, Portal, Modal, TextInput } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import {
+  SettingsService,
+  CommitteeIncomeService,
+  CommitteeExpensesService,
+  FeePaymentsService,
+  MeterReadingsService,
+  CommitteeIncome,
+  CommitteeExpense,
+  FeePayment,
+  MeterReading
+} from '../services/firebaseService';
+
+interface UnifiedTransaction {
+  id: string;
+  type: 'income' | 'expense';
+  source: 'committee_income' | 'committee_expense' | 'fee_payment' | 'charging_bill';
+  amount: number;
+  description: string;
+  category: string;
+  date: Date;
+  isPaid?: boolean;
+}
+
+export default function PersonalScreen({ navigation }: any) {
+  const [allTransactions, setAllTransactions] = useState<UnifiedTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [initialBalance, setInitialBalance] = useState(0);
+  const [balanceModalVisible, setBalanceModalVisible] = useState(false);
+  const [editBalance, setEditBalance] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  const monthNames = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+                      'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
+  const loadData = async () => {
+    try {
+      const [incomes, expenses, feePayments, meterReadings, settings] = await Promise.all([
+        CommitteeIncomeService.getAll(),
+        CommitteeExpensesService.getAll(),
+        FeePaymentsService.getAll(),
+        MeterReadingsService.getAll(),
+        SettingsService.get(),
+      ]);
+
+      // Convert all to unified format
+      const unifiedTransactions: UnifiedTransaction[] = [];
+
+      // Add committee incomes (only paid ones)
+      incomes.filter((i: CommitteeIncome) => i.isPaid).forEach((income: CommitteeIncome) => {
+        unifiedTransactions.push({
+          id: income.id!,
+          type: 'income',
+          source: 'committee_income',
+          amount: income.amount,
+          description: income.description,
+          category: income.category,
+          date: income.date instanceof Date ? income.date : new Date(income.date),
+          isPaid: income.isPaid,
+        });
+      });
+
+      // Add committee expenses
+      expenses.forEach((expense: CommitteeExpense) => {
+        unifiedTransactions.push({
+          id: expense.id!,
+          type: 'expense',
+          source: 'committee_expense',
+          amount: expense.amount,
+          description: expense.description,
+          category: expense.category,
+          date: expense.date instanceof Date ? expense.date : new Date(expense.date),
+        });
+      });
+
+      // Add fee payments (only paid ones)
+      feePayments.filter((p: FeePayment) => p.isPaid).forEach((payment: FeePayment) => {
+        unifiedTransactions.push({
+          id: payment.id!,
+          type: 'income',
+          source: 'fee_payment',
+          amount: payment.amount,
+          description: `תשלום דמי ועד - ${payment.residentName}`,
+          category: 'דמי ועד',
+          date: payment.paymentDate instanceof Date ? payment.paymentDate : new Date(payment.paymentDate),
+          isPaid: true,
+        });
+      });
+
+      // Add meter readings (charging bills) - only paid ones
+      meterReadings.filter((r: MeterReading) => r.isPaid).forEach((reading: MeterReading) => {
+        const readingDate = reading.readingDate instanceof Date ? reading.readingDate : new Date(reading.readingDate);
+        unifiedTransactions.push({
+          id: reading.id!,
+          type: 'income',
+          source: 'charging_bill',
+          amount: reading.totalCost,
+          description: `חשבון טעינה - ${monthNames[reading.month - 1]} ${reading.year}`,
+          category: 'טעינת רכב',
+          date: readingDate,
+          isPaid: true,
+        });
+      });
+
+      // Sort by date descending
+      unifiedTransactions.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+      setAllTransactions(unifiedTransactions);
+      if (settings?.personalBalance !== undefined) {
+        setInitialBalance(settings.personalBalance);
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadData();
+  };
+
+  const goToPreviousMonth = () => {
+    if (selectedMonth === 0) {
+      setSelectedMonth(11);
+      setSelectedYear(selectedYear - 1);
+    } else {
+      setSelectedMonth(selectedMonth - 1);
+    }
+  };
+
+  const goToNextMonth = () => {
+    if (selectedMonth === 11) {
+      setSelectedMonth(0);
+      setSelectedYear(selectedYear + 1);
+    } else {
+      setSelectedMonth(selectedMonth + 1);
+    }
+  };
+
+  const handleUpdateBalance = async () => {
+    const newBalance = parseFloat(editBalance);
+    if (isNaN(newBalance)) {
+      Alert.alert('שגיאה', 'נא להזין סכום תקין');
+      return;
+    }
+
+    try {
+      await SettingsService.update({ personalBalance: newBalance });
+      setInitialBalance(newBalance);
+      setBalanceModalVisible(false);
+      Alert.alert('הצלחה', 'היתרה עודכנה בהצלחה');
+    } catch (error) {
+      console.error('Error updating balance:', error);
+      Alert.alert('שגיאה', 'לא ניתן לעדכן את היתרה');
+    }
+  };
+
+  const openBalanceModal = () => {
+    setEditBalance(initialBalance.toString());
+    setBalanceModalVisible(true);
+  };
+
+  // Filter transactions by selected month
+  const selectedMonthTransactions = allTransactions.filter(t => {
+    return t.date.getMonth() === selectedMonth && t.date.getFullYear() === selectedYear;
+  });
+
+  const totalIncome = selectedMonthTransactions
+    .filter(t => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const totalExpenses = selectedMonthTransactions
+    .filter(t => t.type === 'expense')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  // Calculate total balance from all transactions + initial balance
+  const allTimeIncome = allTransactions
+    .filter(t => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const allTimeExpenses = allTransactions
+    .filter(t => t.type === 'expense')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const balance = initialBalance + allTimeIncome - allTimeExpenses;
+
+  const getSourceIcon = (source: string) => {
+    switch (source) {
+      case 'committee_income': return 'cash-plus';
+      case 'committee_expense': return 'cash-minus';
+      case 'fee_payment': return 'account-cash';
+      case 'charging_bill': return 'ev-station';
+      default: return 'cash';
+    }
+  };
+
+  const getSourceLabel = (source: string) => {
+    switch (source) {
+      case 'committee_income': return 'הכנסת ועד';
+      case 'committee_expense': return 'הוצאת ועד';
+      case 'fee_payment': return 'תשלום דייר';
+      case 'charging_bill': return 'חשבון טעינה';
+      default: return '';
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6200EE" />
+        <Text style={styles.loadingText}>טוען נתונים...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      <View style={styles.header}>
+        <Text style={styles.title}>משק בית - עונות השנה 23</Text>
+      </View>
+
+      <View style={styles.summaryContainer}>
+        <Card style={styles.summaryCard}>
+          <Card.Content>
+            <Text style={styles.summaryLabel}>הכנסות החודש</Text>
+            <Text style={[styles.summaryAmount, { color: '#4CAF50' }]}>₪{totalIncome.toLocaleString()}</Text>
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.summaryCard}>
+          <Card.Content>
+            <Text style={styles.summaryLabel}>הוצאות החודש</Text>
+            <Text style={[styles.summaryAmount, { color: '#f44336' }]}>₪{totalExpenses.toLocaleString()}</Text>
+          </Card.Content>
+        </Card>
+
+        <TouchableOpacity onPress={openBalanceModal}>
+          <Card style={[styles.balanceCard, balance < 0 && styles.negativeBalanceCard]}>
+            <Card.Content>
+              <View style={styles.balanceHeader}>
+                <MaterialCommunityIcons name="pencil" size={18} color="#666" />
+                <Text style={styles.summaryLabel}>יתרה כוללת</Text>
+              </View>
+              <Text style={[styles.balanceAmount, balance < 0 && styles.negativeBalance]}>
+                ₪{balance.toLocaleString()}
+              </Text>
+              <Text style={styles.balanceHint}>לחץ לעדכון יתרה התחלתית</Text>
+            </Card.Content>
+          </Card>
+        </TouchableOpacity>
+      </View>
+
+      {/* Month Navigator for Transactions */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>תנועות</Text>
+
+        <View style={styles.monthNavigator}>
+          <TouchableOpacity onPress={goToNextMonth} style={styles.monthArrow}>
+            <MaterialCommunityIcons name="chevron-left" size={28} color="#6200EE" />
+          </TouchableOpacity>
+          <Text style={styles.monthText}>{monthNames[selectedMonth]} {selectedYear}</Text>
+          <TouchableOpacity onPress={goToPreviousMonth} style={styles.monthArrow}>
+            <MaterialCommunityIcons name="chevron-right" size={28} color="#6200EE" />
+          </TouchableOpacity>
+        </View>
+
+        {selectedMonthTransactions.length === 0 ? (
+          <Card style={styles.emptyCard}>
+            <Card.Content>
+              <Text style={styles.emptyText}>אין תנועות בחודש זה</Text>
+            </Card.Content>
+          </Card>
+        ) : (
+          selectedMonthTransactions.map((transaction) => (
+            <Card
+              key={`${transaction.source}-${transaction.id}`}
+              style={[
+                styles.transactionCard,
+                transaction.type === 'income' ? styles.incomeCard : styles.expenseCard
+              ]}
+            >
+              <Card.Content>
+                <View style={styles.transactionRow}>
+                  <View style={[
+                    styles.transactionIcon,
+                    { backgroundColor: transaction.type === 'income' ? '#E8F5E9' : '#FFEBEE' }
+                  ]}>
+                    <MaterialCommunityIcons
+                      name={getSourceIcon(transaction.source)}
+                      size={24}
+                      color={transaction.type === 'income' ? '#4CAF50' : '#f44336'}
+                    />
+                  </View>
+                  <View style={styles.transactionInfo}>
+                    <Text style={styles.transactionCategory}>{transaction.category}</Text>
+                    <Text style={styles.transactionDescription}>{transaction.description}</Text>
+                    <View style={styles.transactionMeta}>
+                      <Text style={styles.transactionDate}>
+                        {transaction.date.toLocaleDateString('he-IL')}
+                      </Text>
+                      <Text style={styles.transactionSource}>{getSourceLabel(transaction.source)}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.transactionAmountContainer}>
+                    <Text style={[
+                      styles.transactionAmount,
+                      transaction.type === 'income' ? styles.incomeAmount : styles.expenseAmount
+                    ]}>
+                      {transaction.type === 'income' ? '+' : '-'}₪{transaction.amount.toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+              </Card.Content>
+            </Card>
+          ))
+        )}
+      </View>
+
+      {/* Balance Edit Modal */}
+      <Portal>
+        <Modal
+          visible={balanceModalVisible}
+          onDismiss={() => setBalanceModalVisible(false)}
+          contentContainerStyle={styles.modalContainer}
+        >
+          <Text style={styles.modalTitle}>עדכון יתרה התחלתית</Text>
+          <Text style={styles.modalSubtitle}>
+            הזן את היתרה שהייתה לך לפני שהתחלת להשתמש באפליקציה
+          </Text>
+          <TextInput
+            label="יתרה התחלתית (₪)"
+            value={editBalance}
+            onChangeText={setEditBalance}
+            mode="outlined"
+            keyboardType="numeric"
+            style={styles.modalInput}
+          />
+          <View style={styles.modalButtons}>
+            <Button
+              mode="outlined"
+              onPress={() => setBalanceModalVisible(false)}
+              style={styles.modalButton}
+            >
+              ביטול
+            </Button>
+            <Button
+              mode="contained"
+              onPress={handleUpdateBalance}
+              style={styles.modalButton}
+            >
+              שמור
+            </Button>
+          </View>
+        </Modal>
+      </Portal>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' },
+  loadingText: { marginTop: 16, fontSize: 16, color: '#666' },
+  header: { padding: 20, backgroundColor: '#6200EE' },
+  title: { fontSize: 28, fontWeight: 'bold', color: '#fff', textAlign: 'right' },
+  summaryContainer: { padding: 16 },
+  summaryCard: { backgroundColor: '#fff', marginBottom: 12 },
+  balanceCard: { backgroundColor: '#E8F5E9', marginBottom: 12 },
+  negativeBalanceCard: { backgroundColor: '#FFEBEE' },
+  summaryLabel: { fontSize: 14, color: '#666', textAlign: 'right', marginBottom: 8 },
+  summaryAmount: { fontSize: 32, fontWeight: 'bold', color: '#333', textAlign: 'right' },
+  balanceAmount: { fontSize: 32, fontWeight: 'bold', color: '#4CAF50', textAlign: 'right' },
+  negativeBalance: { color: '#f44336' },
+  balanceHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  balanceHint: { fontSize: 12, color: '#999', textAlign: 'right', marginTop: 4 },
+  section: { padding: 16, paddingBottom: 32 },
+  sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 12, textAlign: 'right' },
+  monthNavigator: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  monthArrow: {
+    padding: 4,
+  },
+  monthText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  emptyCard: {
+    backgroundColor: '#fff',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+  },
+  transactionCard: {
+    marginBottom: 8,
+    borderRightWidth: 4,
+  },
+  incomeCard: {
+    backgroundColor: '#fff',
+    borderRightColor: '#4CAF50',
+  },
+  expenseCard: {
+    backgroundColor: '#fff',
+    borderRightColor: '#f44336',
+  },
+  transactionRow: { flexDirection: 'row', alignItems: 'center' },
+  transactionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  transactionInfo: { flex: 1, marginHorizontal: 12 },
+  transactionCategory: { fontSize: 16, fontWeight: 'bold', textAlign: 'right' },
+  transactionDescription: { fontSize: 14, color: '#666', textAlign: 'right' },
+  transactionMeta: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 4, gap: 12 },
+  transactionDate: { fontSize: 12, color: '#999' },
+  transactionSource: { fontSize: 12, color: '#2196F3', fontWeight: '500' },
+  transactionAmountContainer: { alignItems: 'flex-start' },
+  transactionAmount: { fontSize: 18, fontWeight: 'bold' },
+  incomeAmount: { color: '#4CAF50' },
+  expenseAmount: { color: '#f44336' },
+  modalContainer: {
+    backgroundColor: '#fff',
+    padding: 20,
+    margin: 20,
+    borderRadius: 8,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  modalInput: {
+    marginBottom: 16,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+  },
+});
